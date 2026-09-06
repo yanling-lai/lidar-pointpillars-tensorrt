@@ -1,0 +1,22 @@
+# Byte-compiled / cached
+__pycache__/
+*.pyc
+
+# Data files
+*.pkl
+
+# Virtual environment
+.venv/
+
+# Vendored / third-party
+mmdetection3d/
+mmdeploy/
+
+# Project data & artifacts
+data/
+checkpoints/
+work_dirs/
+outputs/
+
+# Local-only scripts
+scripts/local/
