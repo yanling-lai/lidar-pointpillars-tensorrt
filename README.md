@@ -13,7 +13,7 @@ Built as a flagship portfolio piece targeting 3D computer vision / LiDAR percept
 | # | Milestone | Status |
 |---|---|---|
 | 1 | PyTorch baseline (official pretrained KITTI-3class checkpoint) | ✅ Done — validated |
-| 2 | ONNX export via MMDeploy | 🔲 Next up |
+| 2 | ONNX export via MMDeploy | ✅ Done — validated |
 | 3 | TensorRT engine, FP32 → FP16 | 🔲 Not started |
 | 4 | Custom voxelize + NMS/decode wrapper | 🔲 Not started — the core technical challenge |
 | 5 | Benchmark: PyTorch vs ONNX Runtime vs TensorRT (latency, throughput, mAP) | 🔲 Not started |
@@ -21,7 +21,7 @@ Built as a flagship portfolio piece targeting 3D computer vision / LiDAR percept
 | 7 | ROS 2 wrapper | ⬜ Stretch goal |
 | 8 | Jetson compatibility analysis (written, not hardware-validated — no device available) | ⬜ Stretch goal |
 
-## Baseline results (current)
+## Baseline results
 
 Official pretrained checkpoint (`hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class`), evaluated on the standard KITTI val split (3,769 frames):
 
@@ -36,7 +36,17 @@ Validated three independent ways, not just the aggregate number:
 
 Full log: [`results/baseline_eval_log.txt`](results/baseline_eval_log.txt).
 
-This baseline is the "before" row for the eventual PyTorch vs. ONNX Runtime vs. TensorRT FP32/FP16 benchmark table.
+### ONNX export validation
+
+Exported via MMDeploy and re-evaluated on the full val split, to confirm the export preserved model correctness before touching TensorRT:
+
+| Metric | PyTorch (baseline) | ONNX Runtime (exported) | Diff |
+|---|---|---|---|
+| AP40, Overall, Moderate, 3D | 64.3590 | **64.3536** | 0.0054 |
+
+Effectively a rounding-level difference — confirms the exported graph (backbone + detection head) is numerically faithful to the PyTorch model. This does **not** yet validate the standalone voxelize/NMS wrapper, which still relies on MMDeploy's own Python-side pre/post-processing at eval time — that remains the project's core unsolved milestone. Full writeup, including the environment issues hit along the way: [`docs/onnx-export.md`](docs/onnx-export.md).
+
+These two rows are the "before" data for the eventual PyTorch vs. ONNX Runtime vs. TensorRT FP32/FP16 benchmark table.
 
 ## Key technical decisions
 
@@ -45,7 +55,7 @@ This baseline is the "before" row for the eventual PyTorch vs. ONNX Runtime vs. 
 | Model architecture | PointPillars (MMDetection3D) | Voxel/pillar-based — avoids the sparse-conv custom-CUDA export wall that makes other 3D architectures far riskier to deploy under TensorRT |
 | Training approach | Official pretrained checkpoint, not trained from scratch | Project's value is the deployment/optimization work, not re-proving training competency |
 | Environment isolation | `venv`, not conda | Matches the deployment target's own convention — conda is known to conflict with ROS2's `colcon`/`ament` build system, and Jetson/JetPack itself doesn't use conda |
-| CUDA version | 11.8 | Matched to the TensorRT version below, not just "whatever's newest" |
+| CUDA version | 11.8 | Matched to the TensorRT version below |
 | **TensorRT version** | **10.12, not the newer 11.x line** | **TensorRT 11.2.1 has no Jetson/JetPack support at all** ([NVIDIA docs](https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/installing.html)) — Jetson Orin deployments must stay on a TensorRT 10.x release. Building against 11.x would make any Jetson-feasibility analysis reference a TensorRT line that can't actually run on the target hardware. |
 | TensorRT install method | tar, not deb | No root required, fully self-contained/portable, multiple versions can coexist — consistent with the `venv` choice above |
 
@@ -66,9 +76,11 @@ This isn't yet implemented — tracked as the current top-priority milestone.
 lidar-pointpillars-tensorrt/
 ├── README.md
 ├── requirements.txt
-├── results/
-│   └── baseline_eval_log.txt
-└── ...growing as each milestone above lands
+├── docs/
+│   └── onnx-export.md
+└── results/
+    ├── baseline_eval_log.txt
+    └── onnx_export_eval_log.txt
 ```
 
 Full target structure (populated incrementally, not scaffolded in advance):
@@ -85,7 +97,7 @@ Full target structure (populated incrementally, not scaffolded in advance):
 └── docs/              # architecture + full benchmark methodology
 ```
 
-## Setup (current — baseline only)
+## Setup (current — baseline + ONNX export)
 
 ```bash
 python3.10 -m venv .venv
@@ -95,6 +107,8 @@ pip install -r requirements.txt
 
 Requires: KITTI dataset (Velodyne, calib, labels, **and** `image_2` — needed even for LiDAR-only training, since KITTI's camera-FOV frustum culling requires image dimensions) registered/downloaded separately from [cvlibs.net/datasets/kitti](https://www.cvlibs.net/datasets/kitti), processed via MMDetection3D's `create_data.py`.
 
+**Note:** `requirements.txt` deliberately excludes TensorRT, MMDetection3D, and MMDeploy — TensorRT is installed manually from NVIDIA's tar distribution (not PyPI), and MMDetection3D/MMDeploy are editable installs from cloned repos, not published pip packages. `pip freeze` would otherwise emit broken or misleading lines for all three. See the [Environment table](#environment-verified-working) below and [`docs/onnx-export.md`](docs/onnx-export.md) for the manual install steps and version-pinning fixes required for each.
+
 ### Environment (verified working)
 
 | Component | Version |
@@ -103,17 +117,20 @@ Requires: KITTI dataset (Velodyne, calib, labels, **and** `image_2` — needed e
 | GPU | RTX 3060, 12GB |
 | NVIDIA Driver | 535.183.01 |
 | CUDA Toolkit | 11.8 |
+| cuDNN | 8.9.7 (built for CUDA 11.x) |
 | TensorRT | 10.12 (tar install) |
 | MMDetection3D | 1.4.0 (commit `962f0937`) |
+| MMDeploy | 1.3.1 |
+| onnxruntime-gpu | 1.16.3 |
 | Python | 3.10 |
 
-Pip-installable dependencies are pinned in [`requirements.txt`](requirements.txt) — the table above covers system-level dependencies (driver, CUDA toolkit, TensorRT) that `pip freeze` can't capture. If you hit a version-mismatch error, check this table before anything else — it's the single most common failure mode across this whole ecosystem.
+Pip-installable dependencies are pinned in [`requirements.txt`](requirements.txt) — the table above covers system-level and manually-installed dependencies `pip freeze` can't reliably capture (see note above). If you hit a version-mismatch error, check this table before anything else — it's the single most common failure mode across this whole ecosystem.
 
-ONNX/TensorRT setup instructions will be added once that stage lands.
+TensorRT engine-build setup instructions will be added once that stage lands.
 
 ## Roadmap
 
-- [ ] ONNX export via MMDeploy — isolate export correctness from TensorRT correctness by validating against ONNX Runtime first
+- [x] ONNX export via MMDeploy — validated against ONNX Runtime, AP40 moderate 3D within 0.0054 of PyTorch baseline. See [`docs/onnx-export.md`](docs/onnx-export.md).
 - [ ] Standalone voxelize + NMS/decode modules, verified against PyTorch baseline output
 - [ ] TensorRT engine build (FP32 → FP16) via TensorRT 10.12 Python API
 - [ ] Full benchmark: latency, throughput, and mAP across PyTorch / ONNX Runtime / TensorRT
