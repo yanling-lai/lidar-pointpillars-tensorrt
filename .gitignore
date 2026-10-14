@@ -11,6 +11,9 @@ __pycache__/
 # Virtual environment
 .venv/
 
+# Editor / IDE
+.vscode/
+
 # Vendored / third-party
 mmdetection3d/
 mmdeploy/

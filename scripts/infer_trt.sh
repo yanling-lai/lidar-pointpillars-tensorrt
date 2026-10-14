@@ -1,0 +1,1 @@
+python src/inference/infer_trt.py pointpillars
